@@ -1,7 +1,7 @@
 {
-  "source_dir": "/Users/djengua/Documents/JALISCO",
+  "source_dir": "/Users/djengua/Documents/JALISCO1",
   "extra_page_pdf": "/Users/djengua/Documents/page.pdf",
-  "output_dir": "/Volumes/Djengua/Documents/JALISCO3",
+  "output_dir": "/Users/djengua/Documents/JALISCO2",
   "threads": 8,
   "db_insert": false,
   "db_path": "vidasaludable_merger_pdfs.sqlite",
