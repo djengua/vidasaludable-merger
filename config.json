@@ -1,0 +1,16 @@
+{
+  "source_dir": "/Users/djengua/Documents/JALISCO",
+  "extra_page_pdf": "/Users/djengua/Documents/page.pdf",
+  "output_dir": "/Volumes/Djengua/Documents/JALISCO3",
+  "threads": 8,
+  "db_insert": false,
+  "db_path": "vidasaludable_merger_pdfs.sqlite",
+  "sftp": {
+    "enabled": false,
+    "host": "ejemplo.com",
+    "port": 22,
+    "username": "usuario",
+    "password": "secreta",
+    "remote_dir": "/ruta/remota/"
+  }
+}
