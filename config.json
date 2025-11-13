@@ -4,6 +4,7 @@
   "output_dir": "/Users/djengua/Documents/JALISCO2",
   "threads": 8,
   "db_insert": false,
+  "delete_file": false,
   "db_path": "vidasaludable_merger_pdfs.sqlite",
   "sftp": {
     "enabled": false,
