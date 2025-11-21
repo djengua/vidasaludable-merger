@@ -4,8 +4,13 @@
   "output_dir": "/Users/djengua/Documents/JALISCO2",
   "threads": 8,
   "db_insert": false,
-  "delete_file": false,
+  "delete_file": true,
   "db_path": "vidasaludable_merger_pdfs.sqlite",
+  "postgres": {
+    "enabled": true,
+    "dsn": "postgresql://usuario:password@host:5432/tu_basedatos",
+    "table_name": "pdf_stats"
+  },
   "sftp": {
     "enabled": false,
     "host": "ejemplo.com",

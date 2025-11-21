@@ -1,4 +1,5 @@
 import os
+import uuid
 import json
 import time
 import sqlite3
@@ -8,7 +9,10 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from typing import Optional
 
-from pypdf import PdfReader, PdfWriter  # o from PyPDF2 import PdfReader, PdfWriter
+# o from PyPDF2 import PdfReader, PdfWriter
+from pypdf import PdfReader, PdfWriter
+import psycopg2
+from psycopg2.extras import execute_values
 
 
 @dataclass
@@ -20,6 +24,7 @@ class PdfStat:
     duration_ms: int
     status: str
     error_message: Optional[str]
+    batch_id: str
 
 
 # ----------------------------
@@ -28,7 +33,7 @@ class PdfStat:
 
 class Config:
     def __init__(self, data: dict):
-        
+
         self.source_dir = data["source_dir"]
         self.extra_page_pdf = data["extra_page_pdf"]
         self.output_dir = data["output_dir"]
@@ -36,6 +41,8 @@ class Config:
         self.db_insert = data.get("db_insert", False)
         self.db_path = data.get("db_path", "procesamiento_pdfs.sqlite")
         self.sftp = data.get("sftp", {})
+        self.delete_file = data.get("delete_file", False)
+        self.postgres = data.get("postgres", {})
 
     @staticmethod
     def load(path: str) -> "Config":
@@ -43,51 +50,6 @@ class Config:
             data = json.load(f)
         return Config(data)
 
-
-# ----------------------------
-# DB / Estadísticas
-# ----------------------------
-
-# class StatsDB:
-#     def __init__(self, db_path: str):
-#         self.db_path = db_path
-#         self._lock = threading.Lock()
-#         self._init_db()
-
-#     def _init_db(self):
-#         conn = sqlite3.connect(self.db_path)
-#         try:
-#             conn.execute("""
-#                 CREATE TABLE IF NOT EXISTS pdf_stats (
-#                   id INTEGER PRIMARY KEY AUTOINCREMENT,
-#                   file_path TEXT NOT NULL,
-#                   output_path TEXT,
-#                   started_at TEXT NOT NULL,
-#                   finished_at TEXT NOT NULL,
-#                   duration_ms INTEGER NOT NULL,
-#                   status TEXT NOT NULL,
-#                   error_message TEXT
-#                 );
-#             """)
-#             conn.commit()
-#         finally:
-#             conn.close()
-
-#     def insert_stat(self, file_path, output_path, started_at, finished_at,
-#                     duration_ms, status, error_message=None):
-#         with self._lock:
-#             conn = sqlite3.connect(self.db_path)
-#             try:
-#                 conn.execute("""
-#                     INSERT INTO pdf_stats
-#                     (file_path, output_path, started_at, finished_at,
-#                      duration_ms, status, error_message)
-#                     VALUES (?, ?, ?, ?, ?, ?, ?);
-#                 """, (file_path, output_path, started_at, finished_at,
-#                       duration_ms, status, error_message))
-#                 conn.commit()
-#             finally:
-#                 conn.close()
 
 def init_db(db_path: str):
     conn = sqlite3.connect(db_path)
@@ -101,7 +63,8 @@ def init_db(db_path: str):
               finished_at TEXT NOT NULL,
               duration_ms INTEGER NOT NULL,
               status TEXT NOT NULL,
-              error_message TEXT
+              error_message TEXT,
+              batch_id TEXT NOT NULL
             );
         """)
         conn.commit()
@@ -118,8 +81,8 @@ def insert_stats_bulk(db_path: str, stats: list[PdfStat]):
         conn.executemany("""
             INSERT INTO pdf_stats
             (file_path, output_path, started_at, finished_at,
-             duration_ms, status, error_message)
-            VALUES (?, ?, ?, ?, ?, ?, ?);
+            duration_ms, status, error_message, batch_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?);
         """, [
             (
                 s.file_path,
@@ -129,6 +92,7 @@ def insert_stats_bulk(db_path: str, stats: list[PdfStat]):
                 s.duration_ms,
                 s.status,
                 s.error_message,
+                s.batch_id
             )
             for s in stats
         ])
@@ -139,6 +103,7 @@ def insert_stats_bulk(db_path: str, stats: list[PdfStat]):
 # ----------------------------
 # Utilidades
 # ----------------------------
+
 
 def discover_pdfs(source_dir: str):
     pdfs = []
@@ -169,54 +134,7 @@ def format_eta(seconds: float) -> str:
 # Procesamiento de un PDF
 # ----------------------------
 
-# def process_single_pdf(pdf_path: str, cfg: Config, stats_db: StatsDB, extra_page_reader: PdfReader):
-#     ENABLED = False
-#     started_at = datetime.utcnow().isoformat()
-#     t0 = time.time()
-
-#     rel_path = os.path.relpath(pdf_path, cfg.source_dir)
-#     output_path = os.path.join(cfg.output_dir, rel_path)
-#     ensure_dir(os.path.dirname(output_path))
-
-#     try:
-#         reader = PdfReader(pdf_path)
-#         writer = PdfWriter()
-
-#         # Copiar todas las páginas del PDF original
-#         for page in reader.pages:
-#             writer.add_page(page)
-
-#         # Agregar la primera (y única) página del PDF extra
-#         writer.add_page(extra_page_reader.pages[0])
-
-#         # Guardar resultado
-#         with open(output_path, "wb") as f_out:
-#             writer.write(f_out)
-
-#         status = "OK"
-#         error_message = None
-#     except Exception as e:
-#         status = "ERROR"
-#         error_message = str(e)
-#         output_path = None
-#     finally:
-#         t1 = time.time()
-#         finished_at = datetime.utcnow().isoformat()
-#         duration_ms = int((t1 - t0) * 1000)
-
-#         if ENABLED:
-#             stats_db.insert_stat(
-#                 file_path=pdf_path,
-#                 output_path=output_path,
-#                 started_at=started_at,
-#                 finished_at=finished_at,
-#                 duration_ms=duration_ms,
-#                 status=status,
-#                 error_message=error_message,
-#             )
-
-#     return status, duration_ms
-def process_single_pdf(pdf_path: str, cfg: Config, extra_page_reader: PdfReader) -> PdfStat:
+def process_single_pdf(pdf_path: str, cfg: Config, extra_page_reader: PdfReader, batch_id: str) -> PdfStat:
     started_at = datetime.utcnow().isoformat()
     t0 = time.time()
 
@@ -224,31 +142,44 @@ def process_single_pdf(pdf_path: str, cfg: Config, extra_page_reader: PdfReader)
     output_path = os.path.join(cfg.output_dir, rel_path)
     ensure_dir(os.path.dirname(output_path))
 
+    status = "ERROR"
+    error_message = None
+
     try:
         reader = PdfReader(pdf_path)
         writer = PdfWriter()
 
-        # Copiar todas las páginas del PDF original
         for page in reader.pages:
             writer.add_page(page)
 
-        # Agregar la página extra
         writer.add_page(extra_page_reader.pages[0])
 
-        # Guardar resultado
         with open(output_path, "wb") as f_out:
             writer.write(f_out)
 
         status = "OK"
-        error_message = None
+
     except Exception as e:
         status = "ERROR"
         error_message = str(e)
         output_path = None
+
     finally:
         t1 = time.time()
         finished_at = datetime.utcnow().isoformat()
         duration_ms = int((t1 - t0) * 1000)
+
+        # ============================
+        # 🔥 ELIMINAR ORIGINAL SI OK
+        # ============================
+        if status == "OK" and cfg.delete_file:
+            try:
+                os.remove(pdf_path)
+            except Exception as e:
+                if error_message:
+                    error_message += f" | Fallo al borrar: {e}"
+                else:
+                    error_message = f"Procesado OK, pero fallo al borrar: {e}"
 
     return PdfStat(
         file_path=pdf_path,
@@ -258,7 +189,82 @@ def process_single_pdf(pdf_path: str, cfg: Config, extra_page_reader: PdfReader)
         duration_ms=duration_ms,
         status=status,
         error_message=error_message,
+        batch_id=batch_id,
     )
+
+
+def sync_sqlite_to_postgres(sqlite_path: str, pg_dsn: str, table_name: str = "pdf_stats", batch_size: int = 5000):
+    """
+    Lee todos los registros de pdf_stats en SQLite y los inserta en una tabla equivalente en PostgreSQL.
+    Se ejecuta típicamente al final del procesamiento.
+    """
+
+    print("Iniciando sincronización SQLite -> Postgres...")
+
+    # Conexión a SQLite
+    sqlite_conn = sqlite3.connect(sqlite_path)
+    sqlite_cur = sqlite_conn.cursor()
+
+    # Conexión a Postgres
+    pg_conn = psycopg2.connect(pg_dsn)
+    pg_cur = pg_conn.cursor()
+
+    try:
+        # Crear tabla en Postgres si no existe
+        create_table_sql = f"""
+        CREATE TABLE IF NOT EXISTS {table_name} (
+            id SERIAL PRIMARY KEY,
+            file_path TEXT NOT NULL,
+            output_path TEXT,
+            started_at TIMESTAMP NOT NULL,
+            finished_at TIMESTAMP NOT NULL,
+            duration_ms INTEGER NOT NULL,
+            status TEXT NOT NULL,
+            error_message TEXT,
+            batch_id UUID NOT NULL
+        );
+        """
+        pg_cur.execute(create_table_sql)
+        pg_conn.commit()
+
+        # Leer desde SQLite en streaming
+        sqlite_cur.execute("""
+            SELECT file_path, output_path, started_at, finished_at, duration_ms, status, error_message, batch_id
+            FROM pdf_stats
+        """)
+
+        rows_fetched = 0
+        total_inserted = 0
+
+        while True:
+            rows = sqlite_cur.fetchmany(batch_size)
+            if not rows:
+                break
+
+            rows_fetched += len(rows)
+
+            # Insertar en Postgres por lotes
+            insert_sql = f"""
+                INSERT INTO {table_name}
+                (file_path, output_path, started_at, finished_at,
+                 duration_ms, status, error_message, batch_id)
+                VALUES %s
+            """
+
+            execute_values(pg_cur, insert_sql, rows)
+            pg_conn.commit()
+
+            total_inserted += len(rows)
+            print(f"Sincronizados {total_inserted} registros...")
+
+        print(
+            f"Sincronización completada. Total registros insertados en Postgres: {total_inserted}")
+
+    finally:
+        sqlite_cur.close()
+        sqlite_conn.close()
+        pg_cur.close()
+        pg_conn.close()
 
 
 # ----------------------------
@@ -290,7 +296,8 @@ class ProgressTracker:
             remaining = self.total_files - self.processed_files
             eta = remaining * avg_per_file
 
-            percent = (self.processed_files / self.total_files) * 100 if self.total_files else 100
+            percent = (self.processed_files / self.total_files) * \
+                100 if self.total_files else 100
 
             print(
                 f"[{self.processed_files}/{self.total_files}] "
@@ -301,7 +308,8 @@ class ProgressTracker:
 
     def summary(self):
         elapsed = time.time() - self.start_time
-        avg_ms = self.total_duration_ms / self.processed_files if self.processed_files else 0
+        avg_ms = self.total_duration_ms / \
+            self.processed_files if self.processed_files else 0
         return {
             "total_files": self.total_files,
             "processed_files": self.processed_files,
@@ -312,66 +320,10 @@ class ProgressTracker:
         }
 
 
-# ----------------------------
-# (Futuro) SFTP
-# ----------------------------
-# Placeholder: luego puedes implementar la subida por SFTP
-# usando paramiko, leyendo cfg.sftp y recorriendo
-# lo que ya está en la BD con status = 'OK'.
-
-
-# ----------------------------
-# main
-# ----------------------------
-
-# def main():
-#     cfg = Config.load("config.json")
-
-#     # Descubrir PDFs
-#     pdf_files = discover_pdfs(cfg.source_dir)
-#     total_files = len(pdf_files)
-#     print(f"Encontrados {total_files} PDFs para procesar.")
-
-#     if total_files == 0:
-#         return
-
-#     ensure_dir(cfg.output_dir)
-
-#     stats_db = StatsDB(cfg.db_path)
-#     progress = ProgressTracker(total_files)
-
-#     # Cargar el PDF de una sola página solo una vez
-#     extra_page_reader = PdfReader(cfg.extra_page_pdf)
-
-#     # Procesar en paralelo
-#     with ThreadPoolExecutor(max_workers=cfg.threads) as executor:
-#         future_to_path = {
-#             executor.submit(
-#                 process_single_pdf,
-#                 pdf_path,
-#                 cfg,
-#                 stats_db,
-#                 extra_page_reader
-#             ): pdf_path
-#             for pdf_path in pdf_files
-#         }
-
-#         for future in as_completed(future_to_path):
-#             status, duration_ms = future.result()
-#             progress.update(status, duration_ms)
-
-#     # Resumen final
-#     summary = progress.summary()
-#     print("\n=== Resumen de procesamiento ===")
-#     print(f"Total archivos: {summary['total_files']}")
-#     print(f"Procesados:     {summary['processed_files']}")
-#     print(f"OK:             {summary['successful']}")
-#     print(f"Errores:        {summary['failed']}")
-#     print(f"Tiempo total:   {format_eta(summary['elapsed_seconds'])}")
-#     print(f"Promedio por archivo: {summary['avg_ms_per_file']:.2f} ms")
-
 def main():
     cfg = Config.load("config.json")
+    batch_id = str(uuid.uuid4())
+    print(f"Batch ID actual: {batch_id}")
 
     # Descubrir PDFs
     pdf_files = discover_pdfs(cfg.source_dir)
@@ -402,7 +354,7 @@ def main():
                 process_single_pdf,
                 pdf_path,
                 cfg,
-                extra_page_reader
+                extra_page_reader, batch_id,
             ): pdf_path
             for pdf_path in pdf_files
         }
@@ -426,6 +378,19 @@ def main():
     print(f"Tiempo total:   {format_eta(summary['elapsed_seconds'])}")
     print(f"Promedio por archivo: {summary['avg_ms_per_file']:.2f} ms")
 
+    # ============================
+    # 🔁 Sincronización a Postgres
+    # ============================
+    pg_cfg = cfg.postgres
+    if pg_cfg.get("enabled", False):
+        try:
+            sync_sqlite_to_postgres(
+                sqlite_path=cfg.db_path,
+                pg_dsn=pg_cfg["dsn"],
+                table_name=pg_cfg.get("table_name", "pdf_stats"),
+            )
+        except Exception as e:
+            print(f"⚠ Error al sincronizar con Postgres: {e}")
 
 
 if __name__ == "__main__":
