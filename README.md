@@ -105,16 +105,12 @@ El archivo `config.json` controla el comportamiento del programa. Ejemplo:
   "extra_page_pdf": "/ruta/a/hoja_unica.pdf",
   "output_dir": "/ruta/a/salida",
   "threads": 4,
-  "db_insert": true,
-  "db_path": "procesamiento_pdfs.sqlite",
-  "sftp": {
-    "enabled": false,
-    "host": "ejemplo.com",
-    "port": 22,
-    "username": "usuario",
-    "password": "secreta",
-    "remote_dir": "/ruta/remota/"
-  }
+  "delete_file": true,
+  "postgres": {
+    "enabled": true,
+    "dsn": "postgresql://usuario:password@host:5432/tu_basedatos",
+    "table_name": "pdf_stats"
+  },
 }
 ```
 
@@ -136,16 +132,15 @@ El archivo `config.json` controla el comportamiento del programa. Ejemplo:
   Número de hilos de procesamiento en paralelo.
   Ajusta según los núcleos de tu CPU y el tipo de carga (IO vs CPU).
 
-* `db_insert`
-  Inserta valores de tiempos, en base de datos sqlite, para generar estadisticas, indique True para Habilitarlo. **NOTA** Si lo habilita puede verse afectado el tiempo en un 30%.
+* `delete_file`
+  Indica si se eliminaran los archivos origen despues de procesarlo.
 
-* `db_path`
-  Ruta al archivo SQLite donde se guardan las estadísticas de procesamiento.
-
-* `sftp` (para uso futuro)
+* `postgres` (para uso futuro)
 
   * `enabled`: `true` o `false` para activar/desactivar la subida SFTP.
-  * `host`, `port`, `username`, `password`, `remote_dir`: parámetros de conexión al servidor SFTP.
+  * `dsn`: parámetros de conexión a la BD.
+  * `table_name`: Nombre de la tabla a la Base de Datos.
+  
 
 ---
 

@@ -2,9 +2,9 @@ import os
 import uuid
 import json
 import time
-import sqlite3
 import threading
-from datetime import datetime
+# from datetime import datetime
+from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from typing import Optional
@@ -25,6 +25,8 @@ class PdfStat:
     status: str
     error_message: Optional[str]
     batch_id: str
+    nodo: Optional[str] = None
+    procesoid: Optional[str] = None
 
 
 # ----------------------------
@@ -38,11 +40,11 @@ class Config:
         self.extra_page_pdf = data["extra_page_pdf"]
         self.output_dir = data["output_dir"]
         self.threads = data.get("threads", 4)
-        self.db_insert = data.get("db_insert", False)
-        self.db_path = data.get("db_path", "procesamiento_pdfs.sqlite")
         self.sftp = data.get("sftp", {})
         self.delete_file = data.get("delete_file", False)
-        self.postgres = data.get("postgres", {})
+
+        self.postgres = data.get("postgres", {"enabled": False})
+        self.nodo = data.get("nodo", os.uname().nodename)
 
     @staticmethod
     def load(path: str) -> "Config":
@@ -51,54 +53,88 @@ class Config:
         return Config(data)
 
 
-def init_db(db_path: str):
-    conn = sqlite3.connect(db_path)
-    try:
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS pdf_stats (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              file_path TEXT NOT NULL,
-              output_path TEXT,
-              started_at TEXT NOT NULL,
-              finished_at TEXT NOT NULL,
-              duration_ms INTEGER NOT NULL,
-              status TEXT NOT NULL,
-              error_message TEXT,
-              batch_id TEXT NOT NULL
-            );
-        """)
-        conn.commit()
-    finally:
-        conn.close()
+# ----------------------------
+# Postgres
+# ----------------------------
 
-
-def insert_stats_bulk(db_path: str, stats: list[PdfStat]):
-    if not stats:
+def init_postgres(pg_cfg: dict):
+    """
+    Inicializa la tabla pdf_stats en Postgres si no existe.
+    Espera un dict con al menos: {"enabled": bool, "dsn": "postgresql://..."}
+    """
+    if not pg_cfg.get("enabled"):
         return
 
-    conn = sqlite3.connect(db_path)
+    dsn = pg_cfg.get("dsn")
+    if not dsn:
+        print("⚠️ Postgres habilitado pero falta 'dsn' en config.postgres")
+        return
+
+    conn = psycopg2.connect(dsn)
     try:
-        conn.executemany("""
-            INSERT INTO pdf_stats
-            (file_path, output_path, started_at, finished_at,
-            duration_ms, status, error_message, batch_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?);
-        """, [
-            (
-                s.file_path,
-                s.output_path,
-                s.started_at,
-                s.finished_at,
-                s.duration_ms,
-                s.status,
-                s.error_message,
-                s.batch_id
-            )
-            for s in stats
-        ])
-        conn.commit()
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS pdf_stats (
+                        id SERIAL PRIMARY KEY,
+                        file_path TEXT NOT NULL,
+                        output_path TEXT,
+                        started_at TEXT NOT NULL,
+                        finished_at TEXT NOT NULL,
+                        duration_ms INTEGER NOT NULL,
+                        status TEXT NOT NULL,
+                        error_message TEXT,
+                        batch_id TEXT,
+                        nodo TEXT,
+                        procesoid TEXT
+                    );
+                """)
     finally:
         conn.close()
+
+
+def insert_stats_postgres(pg_cfg: dict, stats: list[PdfStat]):
+    """
+    Inserta las estadísticas directamente en Postgres.
+    """
+    if not stats:
+        return
+    if not pg_cfg.get("enabled"):
+        return
+
+    dsn = pg_cfg.get("dsn")
+    if not dsn:
+        print("⚠️ Postgres habilitado pero falta 'dsn' en config.postgres")
+        return
+
+    conn = psycopg2.connect(dsn)
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                cur.executemany("""
+                    INSERT INTO pdf_stats
+                    (file_path, output_path, started_at, finished_at,
+                    duration_ms, status, error_message,
+                    batch_id, nodo, procesoid)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
+                """, [
+                    (
+                        s.file_path,
+                        s.output_path,
+                        s.started_at,
+                        s.finished_at,
+                        s.duration_ms,
+                        s.status,
+                        s.error_message,
+                        s.batch_id,
+                        s.nodo,
+                        s.procesoid,
+                    )
+                    for s in stats
+                ])
+    finally:
+        conn.close()
+
 
 # ----------------------------
 # Utilidades
@@ -117,6 +153,30 @@ def discover_pdfs(source_dir: str):
 def ensure_dir(path: str):
     os.makedirs(path, exist_ok=True)
 
+def remove_empty_dirs(path):
+    """
+    Elimina subcarpetas vacías dentro de 'path' y finalmente intenta eliminar 'path'
+    si también queda vacía.
+    """
+    # Recorremos de abajo hacia arriba
+    for root, dirs, files in os.walk(path, topdown=False):
+        for d in dirs:
+            dir_path = os.path.join(root, d)
+            try:
+                if not os.listdir(dir_path):  # Directorio vacío
+                    os.rmdir(dir_path)
+                    print(f"🗑️ Carpeta eliminada: {dir_path}")
+            except Exception as e:
+                print(f"⚠️ Error eliminando carpeta {dir_path}: {e}")
+
+    # Finalmente intenta eliminar la carpeta raíz si queda vacía
+    try:
+        if not os.listdir(path):
+            os.rmdir(path)
+            print(f"🗑️ Carpeta raíz eliminada: {path}")
+    except Exception as e:
+        print(f"⚠️ Error eliminando carpeta raíz {path}: {e}")
+
 
 def format_eta(seconds: float) -> str:
     seconds = int(seconds)
@@ -130,12 +190,15 @@ def format_eta(seconds: float) -> str:
         return f"{s}s"
 
 
+
 # ----------------------------
 # Procesamiento de un PDF
 # ----------------------------
 
-def process_single_pdf(pdf_path: str, cfg: Config, extra_page_reader: PdfReader, batch_id: str) -> PdfStat:
-    started_at = datetime.utcnow().isoformat()
+def process_single_pdf(pdf_path: str, cfg: Config, extra_page_reader: PdfReader, batch_id: str, nodo: str,
+    procesoid: str,) -> PdfStat:
+    # started_at = datetime.utcnow().isoformat()
+    started_at = datetime.now(timezone.utc).isoformat()
     t0 = time.time()
 
     rel_path = os.path.relpath(pdf_path, cfg.source_dir)
@@ -166,7 +229,7 @@ def process_single_pdf(pdf_path: str, cfg: Config, extra_page_reader: PdfReader,
 
     finally:
         t1 = time.time()
-        finished_at = datetime.utcnow().isoformat()
+        finished_at = datetime.now(timezone.utc).isoformat()
         duration_ms = int((t1 - t0) * 1000)
 
         # ============================
@@ -190,81 +253,9 @@ def process_single_pdf(pdf_path: str, cfg: Config, extra_page_reader: PdfReader,
         status=status,
         error_message=error_message,
         batch_id=batch_id,
+        nodo=nodo,
+        procesoid=procesoid,
     )
-
-
-def sync_sqlite_to_postgres(sqlite_path: str, pg_dsn: str, table_name: str = "pdf_stats", batch_size: int = 5000):
-    """
-    Lee todos los registros de pdf_stats en SQLite y los inserta en una tabla equivalente en PostgreSQL.
-    Se ejecuta típicamente al final del procesamiento.
-    """
-
-    print("Iniciando sincronización SQLite -> Postgres...")
-
-    # Conexión a SQLite
-    sqlite_conn = sqlite3.connect(sqlite_path)
-    sqlite_cur = sqlite_conn.cursor()
-
-    # Conexión a Postgres
-    pg_conn = psycopg2.connect(pg_dsn)
-    pg_cur = pg_conn.cursor()
-
-    try:
-        # Crear tabla en Postgres si no existe
-        create_table_sql = f"""
-        CREATE TABLE IF NOT EXISTS {table_name} (
-            id SERIAL PRIMARY KEY,
-            file_path TEXT NOT NULL,
-            output_path TEXT,
-            started_at TIMESTAMP NOT NULL,
-            finished_at TIMESTAMP NOT NULL,
-            duration_ms INTEGER NOT NULL,
-            status TEXT NOT NULL,
-            error_message TEXT,
-            batch_id UUID NOT NULL
-        );
-        """
-        pg_cur.execute(create_table_sql)
-        pg_conn.commit()
-
-        # Leer desde SQLite en streaming
-        sqlite_cur.execute("""
-            SELECT file_path, output_path, started_at, finished_at, duration_ms, status, error_message, batch_id
-            FROM pdf_stats
-        """)
-
-        rows_fetched = 0
-        total_inserted = 0
-
-        while True:
-            rows = sqlite_cur.fetchmany(batch_size)
-            if not rows:
-                break
-
-            rows_fetched += len(rows)
-
-            # Insertar en Postgres por lotes
-            insert_sql = f"""
-                INSERT INTO {table_name}
-                (file_path, output_path, started_at, finished_at,
-                 duration_ms, status, error_message, batch_id)
-                VALUES %s
-            """
-
-            execute_values(pg_cur, insert_sql, rows)
-            pg_conn.commit()
-
-            total_inserted += len(rows)
-            print(f"Sincronizados {total_inserted} registros...")
-
-        print(
-            f"Sincronización completada. Total registros insertados en Postgres: {total_inserted}")
-
-    finally:
-        sqlite_cur.close()
-        sqlite_conn.close()
-        pg_cur.close()
-        pg_conn.close()
 
 
 # ----------------------------
@@ -323,6 +314,8 @@ class ProgressTracker:
 def main():
     cfg = Config.load("config.json")
     batch_id = str(uuid.uuid4())
+    process_id = str(uuid.uuid4())  # procesoid para esta corrida
+    nodo = cfg.nodo
     print(f"Batch ID actual: {batch_id}")
 
     # Descubrir PDFs
@@ -335,8 +328,11 @@ def main():
 
     ensure_dir(cfg.output_dir)
 
-    # Inicializar BD (solo crea tabla si no existe)
-    init_db(cfg.db_path)
+    use_postgres = cfg.postgres.get("enabled", False)
+    
+    if use_postgres:
+        print("📚 Usando Postgres para registrar estadísticas.")
+        init_postgres(cfg.postgres)
 
     progress = ProgressTracker(total_files)
 
@@ -354,7 +350,10 @@ def main():
                 process_single_pdf,
                 pdf_path,
                 cfg,
-                extra_page_reader, batch_id,
+                extra_page_reader,
+                batch_id,
+                nodo,
+                process_id,
             ): pdf_path
             for pdf_path in pdf_files
         }
@@ -364,9 +363,14 @@ def main():
             all_stats.append(stat)
             progress.update(stat.status, stat.duration_ms)
 
-    # Insertar todas las estadísticas en un solo paso
-    if cfg.db_insert:
-        insert_stats_bulk(cfg.db_path, all_stats)
+    
+    if use_postgres:
+        insert_stats_postgres(cfg.postgres, all_stats)
+    
+    # Eliminar carpetas vacias en el origen.
+    if cfg.delete_file:
+        print("🧹 Eliminando carpetas vacías...")
+        remove_empty_dirs(cfg.source_dir)
 
     # Resumen final
     summary = progress.summary()
@@ -378,19 +382,6 @@ def main():
     print(f"Tiempo total:   {format_eta(summary['elapsed_seconds'])}")
     print(f"Promedio por archivo: {summary['avg_ms_per_file']:.2f} ms")
 
-    # ============================
-    # 🔁 Sincronización a Postgres
-    # ============================
-    pg_cfg = cfg.postgres
-    if pg_cfg.get("enabled", False):
-        try:
-            sync_sqlite_to_postgres(
-                sqlite_path=cfg.db_path,
-                pg_dsn=pg_cfg["dsn"],
-                table_name=pg_cfg.get("table_name", "pdf_stats"),
-            )
-        except Exception as e:
-            print(f"⚠ Error al sincronizar con Postgres: {e}")
 
 
 if __name__ == "__main__":

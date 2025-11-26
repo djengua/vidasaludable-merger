@@ -2,21 +2,11 @@
   "source_dir": "/Users/djengua/Documents/JALISCO1",
   "extra_page_pdf": "/Users/djengua/Documents/page.pdf",
   "output_dir": "/Users/djengua/Documents/JALISCO2",
-  "threads": 8,
-  "db_insert": false,
+  "threads": 4,
   "delete_file": true,
-  "db_path": "vidasaludable_merger_pdfs.sqlite",
   "postgres": {
     "enabled": true,
-    "dsn": "postgresql://usuario:password@host:5432/tu_basedatos",
-    "table_name": "pdf_stats"
+    "dsn": "postgresql://usr_salud:x3Lr4wQ&TLN1r4a32@168.255.101.99:5432/SaludPrueba"
   },
-  "sftp": {
-    "enabled": false,
-    "host": "ejemplo.com",
-    "port": 22,
-    "username": "usuario",
-    "password": "secreta",
-    "remote_dir": "/ruta/remota/"
-  }
+  "nodo": "mac_david"
 }
