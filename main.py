@@ -95,7 +95,9 @@ def init_postgres(pg_cfg: dict):
 
 def insert_stats_postgres(pg_cfg: dict, stats: list[PdfStat]):
     """
-    Inserta las estadísticas directamente en Postgres.
+    Inserta las estadísticas en Postgres de forma individual,
+    haciendo COMMIT cada cierto número de filas para no perder todo
+    si el proceso se interrumpe.
     """
     if not stats:
         return
@@ -107,17 +109,25 @@ def insert_stats_postgres(pg_cfg: dict, stats: list[PdfStat]):
         print("⚠️ Postgres habilitado pero falta 'dsn' en config.postgres")
         return
 
+    # Cada cuántas filas hacemos COMMIT
+    commit_every = int(pg_cfg.get("commit_every", 500))
+
     conn = psycopg2.connect(dsn)
     try:
-        with conn:
-            with conn.cursor() as cur:
-                cur.executemany("""
+        conn.autocommit = False
+        with conn.cursor() as cur:
+            count = 0
+
+            for s in stats:
+                cur.execute(
+                    """
                     INSERT INTO pdf_stats
-                    (file_path, output_path, started_at, finished_at,
-                    duration_ms, status, error_message,
-                    batch_id, nodo, procesoid)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
-                """, [
+                        (file_path, output_path, started_at, finished_at,
+                         duration_ms, status, error_message,
+                         batch_id, nodo, procesoid)
+                    VALUES
+                        (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
+                    """,
                     (
                         s.file_path,
                         s.output_path,
@@ -129,9 +139,22 @@ def insert_stats_postgres(pg_cfg: dict, stats: list[PdfStat]):
                         s.batch_id,
                         s.nodo,
                         s.procesoid,
-                    )
-                    for s in stats
-                ])
+                    ),
+                )
+
+                count += 1
+                # COMMIT parcial
+                if count % commit_every == 0:
+                    conn.commit()
+                    # print(f"✅ Commit parcial de {commit_every} filas (total: {count})")
+
+            # COMMIT final para las que falten
+            conn.commit()
+
+    except Exception as e:
+        conn.rollback()
+        print(f"❌ Error insertando en Postgres: {e}")
+        raise
     finally:
         conn.close()
 
@@ -365,6 +388,7 @@ def main():
 
     
     if use_postgres:
+        print("\n=== Sincronizando a BD... ===")
         insert_stats_postgres(cfg.postgres, all_stats)
     
     # Eliminar carpetas vacias en el origen.

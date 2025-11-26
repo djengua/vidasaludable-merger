@@ -2,7 +2,7 @@
   "source_dir": "/Users/djengua/Documents/JALISCO1",
   "extra_page_pdf": "/Users/djengua/Documents/page.pdf",
   "output_dir": "/Users/djengua/Documents/JALISCO2",
-  "threads": 4,
+  "threads": 8,
   "delete_file": true,
   "postgres": {
     "enabled": true,
