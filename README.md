@@ -111,10 +111,14 @@ El archivo `config.json` controla el comportamiento del programa. Ejemplo:
     "dsn": "postgresql://usuario:password@host:5432/tu_basedatos",
     "table_name": "pdf_stats"
   },
+  "nodo": "name_nodo"
 }
 ```
 
 ### Campos
+
+* `nodo`
+  Nombre del nodo donde se ejecuta el proceso  
 
 * `source_dir`
   Carpeta raíz donde se buscarán PDFs recursivamente (incluye subcarpetas).
