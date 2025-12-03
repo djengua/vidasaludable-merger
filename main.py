@@ -3,6 +3,8 @@ import uuid
 import json
 import time
 import threading
+import platform
+import socket
 # from datetime import datetime
 from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -44,7 +46,8 @@ class Config:
         self.delete_file = data.get("delete_file", False)
 
         self.postgres = data.get("postgres", {"enabled": False})
-        self.nodo = data.get("nodo", os.uname().nodename)
+        # self.nodo = data.get("nodo", os.uname().nodename)
+        self.nodo = data.get("nodo", platform.node() or socket.gethostname())
 
     @staticmethod
     def load(path: str) -> "Config":
@@ -176,6 +179,7 @@ def discover_pdfs(source_dir: str):
 def ensure_dir(path: str):
     os.makedirs(path, exist_ok=True)
 
+
 def remove_empty_dirs(path):
     """
     Elimina subcarpetas vacías dentro de 'path' y finalmente intenta eliminar 'path'
@@ -213,13 +217,12 @@ def format_eta(seconds: float) -> str:
         return f"{s}s"
 
 
-
 # ----------------------------
 # Procesamiento de un PDF
 # ----------------------------
 
 def process_single_pdf(pdf_path: str, cfg: Config, extra_page_reader: PdfReader, batch_id: str, nodo: str,
-    procesoid: str,) -> PdfStat:
+                       procesoid: str,) -> PdfStat:
     # started_at = datetime.utcnow().isoformat()
     started_at = datetime.now(timezone.utc).isoformat()
     t0 = time.time()
@@ -352,7 +355,7 @@ def main():
     ensure_dir(cfg.output_dir)
 
     use_postgres = cfg.postgres.get("enabled", False)
-    
+
     if use_postgres:
         print("📚 Usando Postgres para registrar estadísticas.")
         init_postgres(cfg.postgres)
@@ -386,11 +389,10 @@ def main():
             all_stats.append(stat)
             progress.update(stat.status, stat.duration_ms)
 
-    
     if use_postgres:
         print("\n=== Sincronizando a BD... ===")
         insert_stats_postgres(cfg.postgres, all_stats)
-    
+
     # Eliminar carpetas vacias en el origen.
     if cfg.delete_file:
         print("🧹 Eliminando carpetas vacías...")
@@ -405,7 +407,6 @@ def main():
     print(f"Errores:        {summary['failed']}")
     print(f"Tiempo total:   {format_eta(summary['elapsed_seconds'])}")
     print(f"Promedio por archivo: {summary['avg_ms_per_file']:.2f} ms")
-
 
 
 if __name__ == "__main__":
