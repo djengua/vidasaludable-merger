@@ -1,0 +1,215 @@
+@font-face {
+  font-family: "NotoSans";
+  src: url("fonts/NotoSans-Medium.ttf") format("truetype");
+  font-weight: 500;
+  font-style: normal;
+}
+
+@font-face {
+  font-family: "NotoSans";
+  src: url("fonts/NotoSans-SemiBold.ttf") format("truetype");
+  font-weight: 600;
+  font-style: normal;
+}
+
+@font-face {
+  font-family: "NotoSans";
+  src: url("fonts/NotoSans-ExtraBold.ttf") format("truetype");
+  font-weight: 800;
+  font-style: normal;
+}
+
+@font-face {
+  font-family: "NotoSansExtraBold";
+  src: url("fonts/NotoSans-ExtraBold.ttf") format("truetype");
+  font-weight: 800;
+  font-style: normal;
+}
+
+
+@font-face {
+  font-family: "NotoSansMedium";
+  src: url("fonts/NotoSans-Medium.ttf") format("truetype");
+  font-weight: 500;
+  font-style: normal;
+}
+
+
+@font-face {
+  font-family: "NotoSansSemiBold";
+  src: url("fonts/NotoSans-SemiBold.ttf") format("truetype");
+  font-weight: 600;
+  font-style: normal;
+}
+
+@font-face {
+  font-family: "PatriaRegular";
+  src: url("fonts/Patria_Regular.otf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+}
+
+@page {
+  size: Letter;
+  margin: 0;
+}
+
+html {
+  color: #393939;
+  font-family: Fira Sans;
+  font-size: 11pt;
+  /* font-weight: 300; */
+  line-height: 1.5;
+}
+
+body {
+  background: url('img/fondo2.png') no-repeat;
+  background-position: 0 15mm;
+  font-family: "NotoSans", sans-serif;
+  font-size: 12pt;        /* Tamaño */
+  line-height: 15pt;     /* Interlineado */
+  text-align: justify;   /* Justificado */
+  text-align-last: left; /* Última línea a la izquierda */
+  margin: 0;
+  padding-bottom: 90px;
+
+  p {
+    hyphens: auto;     /* mejor justificado */
+    max-width: 165mm;
+  }
+}
+
+.contenido {
+  margin: 20mm 20mm 10mm 20mm; /* márgenes reales del documento */
+  p {
+    hyphens: auto;     /* mejor justificado */
+    max-width: 165mm;
+  }
+}
+
+.titulo-nombre {
+  font-family: "NotoSansExtraBold", sans-serif;
+  font-size: 12pt;              /* Tamaño */
+  line-height: 9pt;             /* Interlineado */
+  text-align: justify;          /* Justificado */
+  text-align-last: left;        /* Última línea a la izquierda */
+  margin: 0;
+  color: #1e5b4f;
+}
+
+.body-text {
+  font-size: 12px;
+  font-weight: 700;
+  margin-bottom: 6px;
+  font-family: "Noto Sans Extra Bold";
+}
+
+.end-phrase {
+  font-size: 22px;
+  font-weight: 700;
+  margin-bottom: 6px;
+  font-family: "Patria Regular";
+}
+
+.meta {
+  color: #555;
+  margin-bottom: 14px;
+}
+
+.label {
+  font-weight: 700;
+  margin-top: 12px;
+}
+
+.value {
+  margin-top: 4px;
+}
+
+.header-bar {
+  width: 100%;
+  height: 15mm;          /* altura de la barra */
+  background-color: #611232; /* color corporativo */
+}
+
+.verde {
+  color: #1e5b4f;
+  font-weight: bold;
+}
+
+.frase-cierre {
+  font-family: "PatriaRegular", serif;
+  color: #1e5b4f;
+  font-size: 22pt;        /* Tamaño */
+  line-height: 24pt;     /* Interlineado */
+  text-align: justify;   /* Justificado */
+  text-align-last: left; /* Última línea a la izquierda */
+  margin: 18pt 0 0 0;    /* separación superior */
+  text-align: center !important;
+}
+
+.nombre-titular {
+  font-family: "PatriaRegular", serif;
+  font-size: 16pt;        /* Tamaño */
+  line-height: 19.2pt;   /* Interlineado */
+  margin-bottom: 5px;
+  text-align: center !important;
+}
+
+.cargo {
+  color: #a57f2c;
+  text-align: center;
+  font-family: "NotoSansSemiBold", sans-serif;
+  font-size: 12pt;       /* Tamaño */
+  line-height: 8pt;      /* Interlineado */
+  margin-top: 5px;
+}
+
+.texto-qr {
+  font-size: 12px;
+  text-align: left;
+  width: 200px;
+  line-height: 13px;
+}
+
+.footer-bar {
+  width: 100%;
+  height: 4mm;          /* altura de la barra */
+  background-color: #a57f2c; /* color corporativo */
+  margin-top: -25px;
+}
+
+.linea-logos {
+  position: fixed;
+  bottom: 5px;
+  left: 5px;
+  right: 5px;
+  height: 90px;
+  background: url("img/logos_footer.png") no-repeat bottom center;
+  background-size: contain;
+
+}
+
+/* QRs grandes */
+.qr-img {
+  width: 85px;
+  height: 85px;
+  object-fit: contain;
+  background: #fff;
+  border: 1px solid #bdbdbd;
+  border-radius: 8px;
+  flex: 0 0 auto;
+  padding: 3px;
+}
+
+/* Barra amarilla EXACTAMENTE al centro de la hoja */
+.barra-amarilla {
+  height: 100px;
+  width: 3px;
+  background-color: #e6d194;
+  left: 50%;
+  transform: translateX(-50%);
+  border-radius: 3px;
+  margin-left: 30px;
+  margin-right: 25px;
+}
+

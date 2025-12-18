@@ -1,11 +1,12 @@
 import os
 import uuid
+from pathlib import Path
 import json
 import time
 import threading
 import platform
 import socket
-# from datetime import datetime
+from weasyprint import HTML, CSS
 from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
@@ -15,6 +16,106 @@ from typing import Optional
 from pypdf import PdfReader, PdfWriter
 import psycopg2
 from psycopg2.extras import execute_values
+
+
+HTML_TEMPLATE = """
+    <!doctype html>
+<html lang="es">
+
+<head>
+  <title>Carta</title>
+  <meta charset="utf-8" />
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      font-size: 12px;
+      color: #111;
+    }
+
+    .box {
+      border: 1px solid #ddd;
+      padding: 16px;
+      border-radius: 8px;
+    }
+
+    .title {
+      font-size: 18px;
+      font-weight: 700;
+      margin-bottom: 6px;
+    }
+
+    .meta {
+      color: #555;
+      margin-bottom: 14px;
+    }
+
+    .label {
+      font-weight: 700;
+      margin-top: 12px;
+    }
+
+    .value {
+      margin-top: 4px;
+    }
+
+    .footer {
+      margin-top: 18px;
+      font-size: 10px;
+      color: #666;
+    }
+  </style>
+</head>
+
+<body>
+  <ps="box">
+    Estimada Señor(a) {{campo1}}:
+    <p>Tu hijo participó en la jornada de salud de la Estrategia Nacional Vive Saludable, Vive Feliz, impulsada por
+      nuestra
+      presidenta, la Dra. Claudia Sheinbaum Pardo, que se llevó a cabo en su escuela primaria con la intervención de un
+      grupo de especialistas que realizó la medición de su peso y talla, evaluó su agudeza visual y revisó su salud
+      bucal.
+    </p>
+    <p>En el reverso de esta carta, encontrarás el informe de resultados de las valoraciones realizadas, las cuales
+      forman
+      parte de su Expediente Digital de Salud Escolar que se actualizará cada año. Te invito a seguir las
+      recomendaciones
+      de los especialistas y acudir con Manuel Alejandro Mendoza Segura a las clínicas de salud para que, de ser
+      requerido, reciba atención médica.
+    </p>
+    <p>Es importante que sepas que todas las consultas, incluida la entrega de lentes, en caso de que los necesite, son
+      totalmente gratuitas. Si tienes alguna duda sobre a qué clínica asistir para dar seguimiento a la salud de {{campo2}}, comunícate a los teléfonos de tu entidad que aparecen en el directorio publicado en la
+      página vidasaludable.gob.mx</p>
+    <p>Para obtener la versión digital del informe de resultados, puedes descargarlo desde:
+      resultados.vidasaludable.sep.gob.mx o mediante el correo electrónico y/o número de celular que registraste en el
+      consentimiento informado.</p>
+    <p></p><b>¡Ayúdanos a formar a la generación más saludable, fuerte y feliz de nuestra historia!</b></p>
+    <h2>¡Vive Saludable, Vive Feliz!</h2>
+    <h3>Mario Delgado Carrillo</h3>
+    <h4>Secretario de Educación Pública</h4>
+    <p>¿Tienes alguna
+      pregunta o comentario? Comunícate con la mesa de ayuda de tu entidad. https://bit.ly/MesaAyudaVS</p>
+
+    <div class="title">Documento demo (Carta)</div>
+    <div class="meta">Generado: {{fecha}}</div>
+
+    <div class="label">Campo 1</div>
+    <div class="value">{{campo1}}</div>
+
+    <div class="label">Campo 2</div>
+    <div class="value">{{campo2}}</div>
+
+    <div class="footer">* Plantilla base con 2 campos dinámicos</div>
+    </div>
+</body>
+
+</html>
+    """
+CSS_PAGED = """
+    @page {
+    size: Letter;       /* <-- Carta */
+    margin: 20mm;       /* ajusta si quieres más/menos margen */
+    }
+    """
 
 
 @dataclass
@@ -337,7 +438,52 @@ class ProgressTracker:
         }
 
 
+def render_template(campo1: str, campo2: str) -> str:
+    html = HTML_TEMPLATE
+    html = html.replace("{{fecha}}", datetime.now().strftime("%Y-%m-%d %H:%M"))
+    html = html.replace("{{campo1}}", escape_html(campo1))
+    html = html.replace("{{campo2}}", escape_html(campo2))
+    return html
+
+
+def escape_html(s: str) -> str:
+    # Evita que caracteres rompan el HTML
+    return (s.replace("&", "&amp;")
+             .replace("<", "&lt;")
+             .replace(">", "&gt;")
+             .replace('"', "&quot;")
+             .replace("'", "&#39;"))
+
+
+def render_template_from_file(template_path: Path, campo1: str, campo2: str) -> str:
+    html = template_path.read_text(encoding="utf-8")
+    html = html.replace("{{fecha}}", datetime.now().strftime("%Y-%m-%d %H:%M"))
+    html = html.replace("{{campo1}}", escape_html(campo1))
+    html = html.replace("{{campo2}}", escape_html(campo2))
+    return html
+
+
+def generar_pdf_carta(output_pdf: str, campo1: str, campo2: str) -> None:
+    template_path = Path("report") / "carta.html"
+    # <- para resolver globals.css y fonts/...
+    base_dir = template_path.parent.resolve()
+
+    html_str = render_template_from_file(template_path, campo1, campo2)
+
+    HTML(string=html_str, base_url=str(base_dir)).write_pdf(
+        output_pdf,
+        stylesheets=[CSS(string=CSS_PAGED)]
+    )
+
+
 def main():
+    # generar_pdf_carta(
+    #     "salida_carta.pdf",
+    #     campo1="David Jesus Enciso Guadarrama",
+    #     campo2="Eliott David Enciso"
+    # )
+    # print("PDF generado: salida_carta.pdf")
+    
     cfg = Config.load("config.json")
     batch_id = str(uuid.uuid4())
     process_id = str(uuid.uuid4())  # procesoid para esta corrida
